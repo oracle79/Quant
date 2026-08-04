@@ -1,8 +1,9 @@
 [Unit]
-Description=Run BTC research scan every morning
+Description=Run BTC research scan every 15 minutes
 
 [Timer]
-OnCalendar=*-*-* 07:00:00
+OnBootSec=2min
+OnUnitActiveSec=15min
 Persistent=true
 
 [Install]
