@@ -154,6 +154,29 @@ def insert_resolution(market_id, outcome_up):
     conn.close()
 
 
+def markets_needing_resolution():
+    """Markets whose end_date has passed but have no resolution recorded yet.
+    This is what makes historical_base_rate (and future accuracy scoring)
+    actually possible — without this, resolutions never gets populated."""
+    import time as _time
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT m.* FROM markets m
+        LEFT JOIN resolutions r ON r.market_id = m.id
+        WHERE r.id IS NULL AND m.end_date IS NOT NULL AND m.end_date < ?
+        ORDER BY m.end_date DESC LIMIT 50
+    """, (_time.time(),)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def predictions_for_market(market_id):
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM predictions WHERE market_id=? ORDER BY id DESC", (market_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def log_backtest_run(category, asset, timeframe, n_markets, accuracy, brier, log_loss_val,
                       sharpe, max_dd, per_feature_accuracy, weights_used):
     conn = get_conn()
