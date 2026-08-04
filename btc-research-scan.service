@@ -1,0 +1,10 @@
+[Unit]
+Description=BTC Research Platform - Morning Scan
+After=network.target
+
+[Service]
+Type=oneshot
+User=btcquant
+WorkingDirectory=/opt/btc-research
+EnvironmentFile=/opt/btc-research/.env
+ExecStart=/opt/btc-research/venv/bin/python scan_markets.py

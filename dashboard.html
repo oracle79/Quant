@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC Quant Research Platform</title>
+<style>
+  :root{
+    --bg:#0a0d0c; --panel:#121614; --border:#1f2b26; --text:#d7e4dd; --dim:#6d8377;
+    --up:#3ddc84; --down:#ff5c5c; --accent:#e8c34a; --mono: "JetBrains Mono","SF Mono",Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px;}
+  .wrap{max-width:1150px; margin:0 auto; padding:18px 16px 60px;}
+  header{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;}
+  h1{font-size:15px; letter-spacing:.08em; margin:0; color:var(--accent); text-transform:uppercase;}
+  .sub{color:var(--dim); font-size:11px; margin-top:4px;}
+  .grid2{display:grid; grid-template-columns:1fr; gap:12px;}
+  @media(min-width:800px){.grid2{grid-template-columns:1fr 1fr;}}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;}
+  .panel h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:0 0 12px;}
+  .row{display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--border); font-size:12.5px; gap:10px;}
+  .row:last-child{border-bottom:none;}
+  .row .k{color:var(--dim);}
+  .row .v{font-weight:600; text-align:right;}
+  .up{color:var(--up);} .down{color:var(--down);} .dim{color:var(--dim);}
+  .pill{display:inline-block; padding:2px 8px; border-radius:10px; font-size:10px; margin-left:6px;}
+  .pill.pos{background:#10321f; color:var(--up); border:1px solid #1e5c37;}
+  .pill.neg{background:#3a1414; color:var(--down); border:1px solid #6b1f1f;}
+  button{
+    background:var(--accent); color:var(--bg); border:none; border-radius:4px; padding:8px 14px;
+    font-family:var(--mono); font-size:12px; font-weight:700; cursor:pointer; margin-right:8px; margin-top:6px;
+  }
+  button.ghost{background:none; border:1px solid var(--border); color:var(--dim);}
+  input[type=number]{
+    background:#0e1210; border:1px solid var(--border); color:var(--text); font-family:var(--mono);
+    font-size:12px; padding:5px 7px; border-radius:4px; width:90px;
+  }
+  .loading{color:var(--dim); font-size:12px;}
+  table{width:100%; border-collapse:collapse; font-size:11.5px;}
+  th{text-align:left; color:var(--dim); font-weight:600; padding:6px 4px; border-bottom:1px solid var(--border); font-size:10px; text-transform:uppercase;}
+  td{padding:6px 4px; border-bottom:1px dashed var(--border);}
+  .mc-form{display:flex; gap:8px; flex-wrap:wrap; align-items:end; margin-bottom:10px;}
+  .mc-form label{display:block; font-size:10px; color:var(--dim); margin-bottom:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>BTC Quant Research Platform</h1>
+      <div class="sub">v0.3 · systematic probability model vs. Polymarket-implied probability</div>
+    </div>
+  </header>
+
+  <div class="grid2">
+    <div class="panel">
+      <h2>Backtest Results (with 95% confidence intervals)</h2>
+      <div id="backtestBox" class="loading">loading…</div>
+      <button onclick="runBacktest(100)">Run Backtest (100)</button>
+      <button onclick="runBacktest(500)" class="ghost">Run Backtest (500)</button>
+    </div>
+
+    <div class="panel">
+      <h2>Monte Carlo — Forward Equity Simulation</h2>
+      <div class="mc-form">
+        <div><label>win prob</label><input type="number" id="mcWinProb" value="0.52" step="0.01"></div>
+        <div><label>price (¢)</label><input type="number" id="mcPrice" value="0.50" step="0.01"></div>
+        <div><label>kelly mult</label><input type="number" id="mcKelly" value="0.5" step="0.05"></div>
+        <div><label>trades</label><input type="number" id="mcTrades" value="200" step="10"></div>
+        <button onclick="runMonteCarlo()">Simulate</button>
+      </div>
+      <div id="mcBox" class="loading">enter assumptions and simulate — this shows a RANGE of outcomes, not a single forecast</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Live Predictions</h2>
+    <div id="predictionsBox" class="loading">loading…</div>
+    <button onclick="runScan()">Run Scan Now</button>
+  </div>
+
+  <div id="errBox"></div>
+</div>
+
+<script>
+async function fetchJson(url, opts){
+  const res = await fetch(url, opts);
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+function showErr(msg){ document.getElementById('errBox').innerHTML = `<div class="panel" style="border-color:#6b1f1f;"><span class="down">⚠ ${msg}</span></div>`; }
+function clearErr(){ document.getElementById('errBox').innerHTML = ''; }
+
+async function loadBacktests(){
+  try{
+    const rows = await fetchJson('/api/backtests');
+    const box = document.getElementById('backtestBox');
+    if(!rows.length){ box.innerHTML = '<div class="loading">no backtest run yet</div>'; return; }
+
+    // group by timeframe, show most recent per timeframe
+    const seen = {};
+    const latest = [];
+    for(const r of rows){
+      if(!seen[r.timeframe]){ seen[r.timeframe]=true; latest.push(r); }
+    }
+    let html = '<table><tr><th>TF</th><th>N</th><th>Combined Acc</th><th>95% CI</th><th>Edge?</th></tr>';
+    for(const r of latest){
+      let feat = {};
+      try{ feat = JSON.parse(r.per_feature_accuracy_json || '{}'); }catch(e){}
+      const cm = feat.combined_model || {};
+      const distinguishable = cm.distinguishable_from_coinflip;
+      html += `<tr>
+        <td>${r.timeframe}</td>
+        <td>${r.n_markets}</td>
+        <td>${cm.accuracy!=null ? (cm.accuracy*100).toFixed(1)+'%' : '--'}</td>
+        <td>${cm.ci_lower!=null ? `[${(cm.ci_lower*100).toFixed(0)}%, ${(cm.ci_upper*100).toFixed(0)}%]` : '--'}</td>
+        <td>${distinguishable===true ? '<span class="pill pos">YES</span>' : distinguishable===false ? '<span class="pill neg">no</span>' : '--'}</td>
+      </tr>`;
+      if(feat.momentum || feat.external_data){
+        html += `<tr><td colspan="5" class="dim" style="font-size:10.5px;">
+          momentum: ${feat.momentum? (feat.momentum.accuracy*100).toFixed(1)+'%':'--'} ·
+          external_data: ${feat.external_data? (feat.external_data.accuracy*100).toFixed(1)+'%':'--'}
+        </td></tr>`;
+      }
+    }
+    html += '</table>';
+    box.innerHTML = html;
+    clearErr();
+  }catch(e){ showErr('Failed to load backtests: '+e.message); }
+}
+
+async function runBacktest(n){
+  document.getElementById('backtestBox').innerHTML = '<div class="loading">running backtest across all timeframes… this can take a minute or two (pulling real Binance history)</div>';
+  try{
+    await fetchJson(`/api/run-backtest?n_windows=${n}`, {method:'POST'});
+    loadBacktests();
+  }catch(e){ showErr('Backtest failed: '+e.message); }
+}
+
+async function loadPredictions(){
+  try{
+    const rows = await fetchJson('/api/predictions');
+    const box = document.getElementById('predictionsBox');
+    if(!rows.length){ box.innerHTML = '<div class="loading">no predictions logged yet — run a scan</div>'; return; }
+    let html = '<table><tr><th>Asset/TF</th><th>Mkt</th><th>Model</th><th>Edge</th><th>Conf</th><th>Top driver</th></tr>';
+    for(const r of rows.slice(0,20)){
+      html += `<tr>
+        <td>${r.asset} ${r.timeframe}</td>
+        <td>${(r.market_prob*100).toFixed(1)}%</td>
+        <td>${(r.model_prob*100).toFixed(1)}%</td>
+        <td class="${r.edge>=0?'up':'down'}">${r.edge>=0?'+':''}${(r.edge*100).toFixed(1)}pp</td>
+        <td>${(r.confidence*100).toFixed(0)}%</td>
+        <td class="dim" style="font-size:10.5px;">${(r.explanation||'').slice(0,60)}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    box.innerHTML = html;
+    clearErr();
+  }catch(e){ showErr('Failed to load predictions: '+e.message); }
+}
+
+async function runScan(){
+  document.getElementById('predictionsBox').innerHTML = '<div class="loading">scanning live markets…</div>';
+  try{
+    await fetchJson('/api/run-scan', {method:'POST'});
+    loadPredictions();
+  }catch(e){ showErr('Scan failed: '+e.message); }
+}
+
+async function runMonteCarlo(){
+  const win_prob = parseFloat(document.getElementById('mcWinProb').value);
+  const market_price = parseFloat(document.getElementById('mcPrice').value);
+  const kelly_multiplier = parseFloat(document.getElementById('mcKelly').value);
+  const n_trades = parseInt(document.getElementById('mcTrades').value);
+  document.getElementById('mcBox').innerHTML = '<div class="loading">simulating…</div>';
+  try{
+    const r = await fetchJson('/api/run-montecarlo', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({win_prob, market_price, kelly_multiplier, n_trades, n_simulations:1000})
+    });
+    if(r.error){ document.getElementById('mcBox').innerHTML = `<div class="loading">${r.error}</div>`; return; }
+    document.getElementById('mcBox').innerHTML = `
+      <div class="row"><span class="k">Kelly fraction used</span><span class="v">${(r.kelly_fraction_used*100).toFixed(2)}%</span></div>
+      <div class="row"><span class="k">Median final equity (start=1.0)</span><span class="v">${r.median_final_equity.toFixed(2)}x</span></div>
+      <div class="row"><span class="k">P10 / P90 outcome</span><span class="v">${r.p10_final_equity.toFixed(2)}x / ${r.p90_final_equity.toFixed(2)}x</span></div>
+      <div class="row"><span class="k">Mean max drawdown</span><span class="v down">${(r.mean_max_drawdown*100).toFixed(1)}%</span></div>
+      <div class="row"><span class="k">Probability of ruin</span><span class="v ${r.probability_of_ruin>0.05?'down':'up'}">${(r.probability_of_ruin*100).toFixed(2)}%</span></div>
+    `;
+    clearErr();
+  }catch(e){ showErr('Monte Carlo failed: '+e.message); }
+}
+
+loadBacktests();
+loadPredictions();
+setInterval(loadBacktests, 30000);
+setInterval(loadPredictions, 30000);
+</script>
+</body>
+</html>
