@@ -69,9 +69,15 @@
   </div>
 
   <div class="panel">
+    <h2>Realized Alpha — Kelly-Sized Paper P&L</h2>
+    <div id="alphaBox" class="loading">loading…</div>
+    <div class="sub" style="margin-top:6px;">This is the fix for "accuracy alone is misleading": only counts predictions where real edge existed (a bet would've actually been placed), and weights each by its real payout — a correct 20¢ longshot call counts far more than a correct 50¢ coin-flip call. This is closer to the actual test of whether this makes money.</div>
+  </div>
+
+  <div class="panel">
     <h2>Live Accuracy — Model vs. Real Outcomes</h2>
     <div id="accuracyBox" class="loading">loading…</div>
-    <div class="sub" style="margin-top:6px;">This is the number that actually tells you if this is working — not the backtest, not a single edge, but whether resolved live predictions were right.</div>
+    <div class="sub" style="margin-top:6px;">Directional accuracy across ALL resolved predictions, including ones with no edge where no bet would've been placed. Useful for calibration, but see Realized Alpha above for the number that actually reflects profitability.</div>
   </div>
 
   <div class="grid2">
@@ -138,6 +144,21 @@ async function loadKpi(){
     document.getElementById('kpiResolved').textContent = k.total_resolved;
     document.getElementById('kpiDaysCollecting').textContent = k.days_collecting;
   }catch(e){ /* non-critical, don't block the page on this */ }
+}
+
+async function loadAlpha(){
+  try{
+    const a = await fetchJson('/api/alpha');
+    const box = document.getElementById('alphaBox');
+    if(!a.bets_taken){ box.innerHTML = '<div class="loading">no edge-qualifying bets resolved yet</div>'; return; }
+    const ret = a.cumulative_return_fraction;
+    box.innerHTML = `
+      <div class="big ${ret>=0?'up':'down'}">${ret>=0?'+':''}${(ret*100).toFixed(1)}%</div>
+      <div class="row"><span class="k">Bets taken (had real edge)</span><span class="v">${a.bets_taken} / ${a.n_resolved_total}</span></div>
+      <div class="row"><span class="k">Skipped (no edge, no bet)</span><span class="v">${a.bets_skipped_no_edge}</span></div>
+      <div class="row"><span class="k">Win rate of bets taken</span><span class="v">${(a.win_rate_of_bets_taken*100).toFixed(1)}%</span></div>
+    `;
+  }catch(e){ showErr('Failed to load alpha: '+e.message); }
 }
 
 async function loadAccuracy(){
@@ -309,11 +330,13 @@ loadWeights();
 loadBacktests();
 loadPredictions();
 loadAccuracy();
+loadAlpha();
 loadFeedback();
 setInterval(loadKpi, 30000);
 setInterval(loadBacktests, 30000);
 setInterval(loadPredictions, 30000);
 setInterval(loadAccuracy, 30000);
+setInterval(loadAlpha, 30000);
 </script>
 </body>
 </html>

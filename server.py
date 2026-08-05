@@ -18,6 +18,7 @@ from database import db
 from config.settings import load_weights
 from backtesting.engine import run_full_backtest
 from backtesting.monte_carlo import simulate_equity_paths
+from models.kelly import recommend_position
 import scan_markets
 
 DASHBOARD_USER = os.environ.get("DASHBOARD_USER")
@@ -92,6 +93,53 @@ def trigger_montecarlo(req: MonteCarloRequest, user: str = Depends(require_auth)
 @app.get("/api/weights")
 def weights(user: str = Depends(require_auth)):
     return load_weights()
+
+
+@app.get("/api/alpha")
+def alpha(user: str = Depends(require_auth)):
+    """
+    THE ANSWER TO 'accuracy alone is misleading': for every resolved
+    prediction, simulate the Kelly-sized paper bet it would have placed
+    (only when there was actual edge) and sum the real return. This
+    properly weights a correct low-probability call (bigger payout) against
+    a correct high-probability call (smaller payout) — accuracy % can't do
+    that, P&L can. Non-compounding: each bet sized against a fixed $1
+    notional bankroll, so the total is a clean sum, not compounded growth.
+    """
+    resolved = db.resolved_predictions(limit=1000)
+    bets_taken = 0
+    cumulative_return = 0.0
+    wins = 0
+    curve = [0.0]
+
+    for row in resolved:
+        rec = recommend_position(row["model_prob"], row["market_prob"])
+        if rec["side"] is None:
+            continue  # no edge at prediction time -> no bet would have been placed
+        bets_taken += 1
+        actual_up = bool(row["outcome_up"])
+        if rec["side"] == "UP":
+            entry_price = row["market_prob"]
+            won = actual_up
+        else:
+            entry_price = 1 - row["market_prob"]
+            won = not actual_up
+        entry_price = max(min(entry_price, 0.99), 0.01)
+        frac = rec["kelly_fraction"]
+        pnl = frac * (1 - entry_price) / entry_price if won else -frac
+        cumulative_return += pnl
+        if won:
+            wins += 1
+        curve.append(cumulative_return)
+
+    return {
+        "n_resolved_total": len(resolved),
+        "bets_taken": bets_taken,
+        "bets_skipped_no_edge": len(resolved) - bets_taken,
+        "win_rate_of_bets_taken": (wins / bets_taken) if bets_taken else None,
+        "cumulative_return_fraction": cumulative_return,
+        "equity_curve": curve,
+    }
 
 
 @app.get("/api/kpi")
