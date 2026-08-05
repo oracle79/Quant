@@ -1,0 +1,9 @@
+[Unit]
+Description=Run BTC research weight optimization weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 08:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

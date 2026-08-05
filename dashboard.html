@@ -15,6 +15,11 @@
   header{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--border); padding-bottom:12px;}
   h1{font-size:15px; letter-spacing:.08em; margin:0; color:var(--accent); text-transform:uppercase;}
   .sub{color:var(--dim); font-size:11px; margin-top:4px;}
+  .kpi-strip{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:14px;}
+  @media(min-width:700px){.kpi-strip{grid-template-columns:repeat(4,1fr);}}
+  .kpi-box{background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:12px;}
+  .kpi-box .label{font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin-bottom:4px;}
+  .kpi-box .value{font-size:19px; font-weight:700;}
   .grid2{display:grid; grid-template-columns:1fr; gap:12px;}
   @media(min-width:800px){.grid2{grid-template-columns:1fr 1fr;}}
   .panel{background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:14px; margin-bottom:12px;}
@@ -42,6 +47,9 @@
   td{padding:6px 4px; border-bottom:1px dashed var(--border);}
   .mc-form{display:flex; gap:8px; flex-wrap:wrap; align-items:end; margin-bottom:10px;}
   .mc-form label{display:block; font-size:10px; color:var(--dim); margin-bottom:2px;}
+  .forest-row{margin-bottom:10px;}
+  .forest-label{font-size:11px; color:var(--dim); margin-bottom:3px; display:flex; justify-content:space-between;}
+  canvas{display:block;}
 </style>
 </head>
 <body>
@@ -53,31 +61,53 @@
     </div>
   </header>
 
+  <div class="kpi-strip">
+    <div class="kpi-box"><div class="label">Predictions Logged</div><div class="value" id="kpiPredictions">--</div></div>
+    <div class="kpi-box"><div class="label">Last Scan</div><div class="value" id="kpiLastScan" style="font-size:13px;">--</div></div>
+    <div class="kpi-box"><div class="label">Resolved Markets</div><div class="value" id="kpiResolved">--</div></div>
+    <div class="kpi-box"><div class="label">Days Collecting</div><div class="value" id="kpiDaysCollecting">--</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Live Accuracy — Model vs. Real Outcomes</h2>
+    <div id="accuracyBox" class="loading">loading…</div>
+    <div class="sub" style="margin-top:6px;">This is the number that actually tells you if this is working — not the backtest, not a single edge, but whether resolved live predictions were right.</div>
+  </div>
+
   <div class="grid2">
     <div class="panel">
-      <h2>Backtest Results (with 95% confidence intervals)</h2>
-      <div id="backtestBox" class="loading">loading…</div>
-      <button onclick="runBacktest(100)">Run Backtest (100)</button>
+      <h2>Backtest Results — 95% Confidence (Combined Model)</h2>
+      <div id="forestPlot" class="loading">loading…</div>
+      <div class="sub" style="margin-top:8px;">Bar spans the confidence interval. If it crosses the center line (50%), the result is <b>not</b> distinguishable from a coin flip — that's the honest bar to clear before trusting any edge.</div>
+      <button onclick="runBacktest(200)">Run Backtest (200)</button>
       <button onclick="runBacktest(500)" class="ghost">Run Backtest (500)</button>
     </div>
 
     <div class="panel">
-      <h2>Monte Carlo — Forward Equity Simulation</h2>
-      <div class="mc-form">
-        <div><label>win prob</label><input type="number" id="mcWinProb" value="0.52" step="0.01"></div>
-        <div><label>price (¢)</label><input type="number" id="mcPrice" value="0.50" step="0.01"></div>
-        <div><label>kelly mult</label><input type="number" id="mcKelly" value="0.5" step="0.05"></div>
-        <div><label>trades</label><input type="number" id="mcTrades" value="200" step="10"></div>
-        <button onclick="runMonteCarlo()">Simulate</button>
-      </div>
-      <div id="mcBox" class="loading">enter assumptions and simulate — this shows a RANGE of outcomes, not a single forecast</div>
+      <h2>Algorithm Composition (Current Weights)</h2>
+      <div id="weightsChart" class="loading">loading…</div>
+      <div class="sub" id="feedbackSummary" style="margin-top:8px; white-space:pre-wrap; font-size:10.5px;"></div>
     </div>
+  </div>
+
+  <div class="panel">
+    <h2>Monte Carlo — Forward Equity Simulation</h2>
+    <div class="mc-form">
+      <div><label>win prob</label><input type="number" id="mcWinProb" value="0.52" step="0.01"></div>
+      <div><label>price (¢)</label><input type="number" id="mcPrice" value="0.50" step="0.01"></div>
+      <div><label>kelly mult</label><input type="number" id="mcKelly" value="0.5" step="0.05"></div>
+      <div><label>trades</label><input type="number" id="mcTrades" value="200" step="10"></div>
+      <button onclick="runMonteCarlo()">Simulate</button>
+    </div>
+    <div id="mcBox" class="loading">enter assumptions and simulate — this shows a RANGE of outcomes, not a single forecast</div>
   </div>
 
   <div class="panel">
     <h2>Live Predictions</h2>
     <div id="predictionsBox" class="loading">loading…</div>
     <button onclick="runScan()">Run Scan Now</button>
+    <button onclick="sendTestAlert()" class="ghost">Send Test Telegram Alert</button>
+    <div id="testAlertResult" class="sub" style="margin-top:6px;"></div>
   </div>
 
   <div id="errBox"></div>
@@ -91,50 +121,132 @@ async function fetchJson(url, opts){
 }
 function showErr(msg){ document.getElementById('errBox').innerHTML = `<div class="panel" style="border-color:#6b1f1f;"><span class="down">⚠ ${msg}</span></div>`; }
 function clearErr(){ document.getElementById('errBox').innerHTML = ''; }
+function timeAgo(ts){
+  if(!ts) return '--';
+  const secs = Math.floor(Date.now()/1000 - ts);
+  if(secs < 60) return secs+'s ago';
+  if(secs < 3600) return Math.floor(secs/60)+'m ago';
+  if(secs < 86400) return Math.floor(secs/3600)+'h ago';
+  return Math.floor(secs/86400)+'d ago';
+}
+
+async function loadKpi(){
+  try{
+    const k = await fetchJson('/api/kpi');
+    document.getElementById('kpiPredictions').textContent = k.total_predictions;
+    document.getElementById('kpiLastScan').textContent = timeAgo(k.last_scan_ts);
+    document.getElementById('kpiResolved').textContent = k.total_resolved;
+    document.getElementById('kpiDaysCollecting').textContent = k.days_collecting;
+  }catch(e){ /* non-critical, don't block the page on this */ }
+}
+
+async function loadAccuracy(){
+  try{
+    const a = await fetchJson('/api/accuracy');
+    const box = document.getElementById('accuracyBox');
+    if(!a.n){ box.innerHTML = '<div class="loading">no resolved predictions yet — accuracy will appear once markets start settling</div>'; return; }
+    let html = `<div class="row"><span class="k">Overall (n=${a.n})</span><span class="v ${a.accuracy>=0.5?'up':'down'}">${(a.accuracy*100).toFixed(1)}%</span></div>`;
+    for(const [tf, s] of Object.entries(a.by_timeframe || {})){
+      html += `<div class="row"><span class="k">${tf} (n=${s.n})</span><span class="v ${s.accuracy>=0.5?'up':'down'}">${(s.accuracy*100).toFixed(1)}%</span></div>`;
+    }
+    box.innerHTML = html;
+  }catch(e){ showErr('Failed to load accuracy: '+e.message); }
+}
+
+async function loadFeedback(){
+  try{
+    const f = await fetchJson('/api/feedback');
+    const box = document.getElementById('feedbackSummary');
+    box.textContent = f && f.summary ? f.summary : 'No weight optimization run yet (needs 50+ resolved predictions).';
+  }catch(e){ /* non-critical */ }
+}
+
+async function sendTestAlert(){
+  document.getElementById('testAlertResult').textContent = 'sending…';
+  try{
+    const r = await fetchJson('/api/test-alert', {method:'POST'});
+    document.getElementById('testAlertResult').textContent = r.sent
+      ? '✅ Sent — check your Telegram now.'
+      : `⚠️ Not sent: ${r.reason}`;
+  }catch(e){ document.getElementById('testAlertResult').textContent = 'Failed: '+e.message; }
+}
+
+async function loadWeights(){
+  try{
+    const w = await fetchJson('/api/weights');
+    const box = document.getElementById('weightsChart');
+    const entries = Object.entries(w).sort((a,b)=>b[1]-a[1]);
+    const maxW = Math.max(...entries.map(e=>e[1]));
+    let html = '';
+    for(const [name, weight] of entries){
+      const pct = (weight*100).toFixed(1);
+      const barWidth = (weight/maxW*100).toFixed(0);
+      html += `<div class="forest-row">
+        <div class="forest-label"><span>${name.replace(/_/g,' ')}</span><span>${pct}%</span></div>
+        <div style="background:#0e1210; border-radius:3px; height:14px; overflow:hidden;">
+          <div style="background:var(--accent); height:100%; width:${barWidth}%;"></div>
+        </div>
+      </div>`;
+    }
+    box.innerHTML = html;
+  }catch(e){ showErr('Failed to load weights: '+e.message); }
+}
+
+function drawForestPlot(rows){
+  const box = document.getElementById('forestPlot');
+  if(!rows.length){ box.innerHTML = '<div class="loading">no backtest run yet</div>'; return; }
+  let html = '';
+  for(const r of rows){
+    const lo = r.ci_lower!=null ? r.ci_lower : 0.5;
+    const hi = r.ci_upper!=null ? r.ci_upper : 0.5;
+    const acc = r.accuracy!=null ? r.accuracy : 0.5;
+    // map [0.3, 0.7] range to [0%, 100%] for visual purposes (covers realistic CI range)
+    const scale = (v) => Math.max(0, Math.min(100, (v - 0.30) / 0.40 * 100));
+    const loPct = scale(lo), hiPct = scale(hi), accPct = scale(acc), centerPct = scale(0.5);
+    const distinguishable = r.distinguishable_from_coinflip;
+    const barColor = distinguishable ? (acc>0.5?'var(--up)':'var(--down)') : 'var(--dim)';
+    html += `<div class="forest-row">
+      <div class="forest-label"><span>${r.timeframe} (n=${r.n_markets})</span>
+        <span>${(acc*100).toFixed(1)}% [${(lo*100).toFixed(0)}-${(hi*100).toFixed(0)}]
+        ${distinguishable ? '<span class="pill pos">EDGE</span>' : '<span class="pill neg">no edge</span>'}</span></div>
+      <div style="position:relative; height:16px; background:#0e1210; border-radius:3px;">
+        <div style="position:absolute; left:${centerPct}%; top:0; bottom:0; width:1px; background:var(--border); border-left:1px dashed #3a4a42;"></div>
+        <div style="position:absolute; left:${loPct}%; width:${Math.max(1,hiPct-loPct)}%; top:5px; height:6px; background:${barColor}; border-radius:3px; opacity:0.7;"></div>
+        <div style="position:absolute; left:${accPct}%; top:2px; width:2px; height:12px; background:${barColor};"></div>
+      </div>
+    </div>`;
+  }
+  box.innerHTML = html;
+}
 
 async function loadBacktests(){
   try{
     const rows = await fetchJson('/api/backtests');
-    const box = document.getElementById('backtestBox');
-    if(!rows.length){ box.innerHTML = '<div class="loading">no backtest run yet</div>'; return; }
-
-    // group by timeframe, show most recent per timeframe
+    if(!rows.length){ document.getElementById('forestPlot').innerHTML = '<div class="loading">no backtest run yet</div>'; return; }
     const seen = {};
     const latest = [];
     for(const r of rows){
-      if(!seen[r.timeframe]){ seen[r.timeframe]=true; latest.push(r); }
-    }
-    let html = '<table><tr><th>TF</th><th>N</th><th>Combined Acc</th><th>95% CI</th><th>Edge?</th></tr>';
-    for(const r of latest){
-      let feat = {};
-      try{ feat = JSON.parse(r.per_feature_accuracy_json || '{}'); }catch(e){}
-      const cm = feat.combined_model || {};
-      const distinguishable = cm.distinguishable_from_coinflip;
-      html += `<tr>
-        <td>${r.timeframe}</td>
-        <td>${r.n_markets}</td>
-        <td>${cm.accuracy!=null ? (cm.accuracy*100).toFixed(1)+'%' : '--'}</td>
-        <td>${cm.ci_lower!=null ? `[${(cm.ci_lower*100).toFixed(0)}%, ${(cm.ci_upper*100).toFixed(0)}%]` : '--'}</td>
-        <td>${distinguishable===true ? '<span class="pill pos">YES</span>' : distinguishable===false ? '<span class="pill neg">no</span>' : '--'}</td>
-      </tr>`;
-      if(feat.momentum || feat.external_data){
-        html += `<tr><td colspan="5" class="dim" style="font-size:10.5px;">
-          momentum: ${feat.momentum? (feat.momentum.accuracy*100).toFixed(1)+'%':'--'} ·
-          external_data: ${feat.external_data? (feat.external_data.accuracy*100).toFixed(1)+'%':'--'}
-        </td></tr>`;
+      if(!seen[r.timeframe]){ seen[r.timeframe]=true;
+        let feat = {};
+        try{ feat = JSON.parse(r.per_feature_accuracy_json || '{}'); }catch(e){}
+        const cm = feat.combined_model || {};
+        latest.push({timeframe:r.timeframe, n_markets:r.n_markets, accuracy:cm.accuracy,
+                      ci_lower:cm.ci_lower, ci_upper:cm.ci_upper, distinguishable_from_coinflip:cm.distinguishable_from_coinflip});
       }
     }
-    html += '</table>';
-    box.innerHTML = html;
+    const order = {'5m':0,'15m':1,'1h':2,'4h':3,'1d':4};
+    latest.sort((a,b)=>(order[a.timeframe]??9)-(order[b.timeframe]??9));
+    drawForestPlot(latest);
     clearErr();
   }catch(e){ showErr('Failed to load backtests: '+e.message); }
 }
 
 async function runBacktest(n){
-  document.getElementById('backtestBox').innerHTML = '<div class="loading">running backtest across all timeframes… this can take a minute or two (pulling real Binance history)</div>';
+  document.getElementById('forestPlot').innerHTML = '<div class="loading">running backtest across all timeframes… this can take a minute or two (pulling real Binance history)</div>';
   try{
     await fetchJson(`/api/run-backtest?n_windows=${n}`, {method:'POST'});
     loadBacktests();
+    loadKpi();
   }catch(e){ showErr('Backtest failed: '+e.message); }
 }
 
@@ -165,6 +277,7 @@ async function runScan(){
   try{
     await fetchJson('/api/run-scan', {method:'POST'});
     loadPredictions();
+    loadKpi();
   }catch(e){ showErr('Scan failed: '+e.message); }
 }
 
@@ -191,10 +304,16 @@ async function runMonteCarlo(){
   }catch(e){ showErr('Monte Carlo failed: '+e.message); }
 }
 
+loadKpi();
+loadWeights();
 loadBacktests();
 loadPredictions();
+loadAccuracy();
+loadFeedback();
+setInterval(loadKpi, 30000);
 setInterval(loadBacktests, 30000);
 setInterval(loadPredictions, 30000);
+setInterval(loadAccuracy, 30000);
 </script>
 </body>
 </html>

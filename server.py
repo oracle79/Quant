@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from database import db
+from config.settings import load_weights
 from backtesting.engine import run_full_backtest
 from backtesting.monte_carlo import simulate_equity_paths
 import scan_markets
@@ -86,6 +87,67 @@ def trigger_montecarlo(req: MonteCarloRequest, user: str = Depends(require_auth)
         kelly_multiplier=req.kelly_multiplier, n_trades=req.n_trades,
         n_simulations=req.n_simulations,
     )
+
+
+@app.get("/api/weights")
+def weights(user: str = Depends(require_auth)):
+    return load_weights()
+
+
+@app.get("/api/kpi")
+def kpi(user: str = Depends(require_auth)):
+    preds = db.recent_predictions(limit=1)
+    backtests = db.latest_backtest_runs(limit=10)
+    all_preds = db.recent_predictions(limit=1000)
+    collection_stats = db.data_collection_stats()
+    return {
+        "last_scan_ts": preds[0]["ts"] if preds else None,
+        "total_predictions": len(all_preds),
+        "last_backtest_ts": backtests[0]["run_at"] if backtests else None,
+        "timeframes_tracked": len(set(b["timeframe"] for b in backtests)),
+        "total_resolved": collection_stats["total_resolved"],
+        "days_collecting": collection_stats["days_collecting"],
+    }
+
+
+@app.get("/api/accuracy")
+def accuracy(user: str = Depends(require_auth)):
+    """Live accuracy view (#2): of predictions that have since resolved,
+    how often did the MODEL (not just individual features) call it right?
+    This is the number that actually tells you if this is working."""
+    resolved = db.resolved_predictions(limit=500)
+    if not resolved:
+        return {"n": 0, "accuracy": None, "message": "no resolved predictions yet"}
+    correct = sum(1 for r in resolved if (r["model_prob"] >= 0.5) == bool(r["outcome_up"]))
+    n = len(resolved)
+    by_timeframe = {}
+    for r in resolved:
+        tf = r["timeframe"]
+        by_timeframe.setdefault(tf, {"correct": 0, "n": 0})
+        by_timeframe[tf]["n"] += 1
+        if (r["model_prob"] >= 0.5) == bool(r["outcome_up"]):
+            by_timeframe[tf]["correct"] += 1
+    return {
+        "n": n,
+        "accuracy": correct / n,
+        "by_timeframe": {tf: {"accuracy": s["correct"]/s["n"], "n": s["n"]} for tf, s in by_timeframe.items()},
+    }
+
+
+@app.get("/api/feedback")
+def feedback(user: str = Depends(require_auth)):
+    return db.latest_feedback_run()
+
+
+@app.post("/api/test-alert")
+def test_alert(user: str = Depends(require_auth)):
+    """#3: one-tap way to confirm Telegram is actually wired up and a
+    message really arrives on your phone, instead of just trusting the code."""
+    from telegram import notifier
+    if not notifier.is_configured():
+        return {"sent": False, "reason": "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set in .env"}
+    notifier.send_message("✅ Test alert from BTC Research Platform — if you see this, Telegram is working.")
+    return {"sent": True}
 
 
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")

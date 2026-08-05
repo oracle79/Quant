@@ -90,6 +90,15 @@ def init_db():
             per_feature_accuracy_json TEXT,
             weights_used_json TEXT
         );
+        CREATE TABLE IF NOT EXISTS feedback_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_at REAL,
+            n_predictions_analyzed INTEGER,
+            old_weights_json TEXT,
+            new_weights_json TEXT,
+            per_feature_accuracy_json TEXT,
+            summary TEXT
+        )
     """)
     conn.commit()
     conn.close()
@@ -189,6 +198,57 @@ def log_backtest_run(category, asset, timeframe, n_markets, accuracy, brier, log
           sharpe, max_dd, json.dumps(per_feature_accuracy), json.dumps(weights_used)))
     conn.commit()
     conn.close()
+
+
+def resolved_predictions(limit=1000):
+    """Every prediction whose market has since resolved, paired with the
+    real outcome. This is the ground truth v0.5 (and the live accuracy
+    view) both depend on."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT p.*, r.outcome_up, m.asset, m.timeframe, m.question
+        FROM predictions p
+        JOIN resolutions r ON r.market_id = p.market_id
+        JOIN markets m ON m.id = p.market_id
+        ORDER BY p.id DESC LIMIT ?
+    """, (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def data_collection_stats():
+    conn = get_conn()
+    total_predictions = conn.execute("SELECT COUNT(*) c FROM predictions").fetchone()["c"]
+    total_resolved = conn.execute("SELECT COUNT(*) c FROM resolutions").fetchone()["c"]
+    oldest = conn.execute("SELECT MIN(ts) t FROM predictions").fetchone()["t"]
+    conn.close()
+    import time as _time
+    days_collecting = round((_time.time() - oldest) / 86400, 1) if oldest else 0
+    return {
+        "total_predictions": total_predictions,
+        "total_resolved": total_resolved,
+        "days_collecting": days_collecting,
+    }
+
+
+def log_feedback_run(n_predictions, old_weights, new_weights, per_feature_accuracy, summary):
+    import json
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO feedback_runs (run_at, n_predictions_analyzed, old_weights_json, new_weights_json,
+                                    per_feature_accuracy_json, summary)
+        VALUES (?,?,?,?,?,?)
+    """, (time.time(), n_predictions, json.dumps(old_weights), json.dumps(new_weights),
+          json.dumps(per_feature_accuracy), summary))
+    conn.commit()
+    conn.close()
+
+
+def latest_feedback_run():
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM feedback_runs ORDER BY id DESC LIMIT 1").fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def latest_backtest_runs(limit=20):
