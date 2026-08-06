@@ -15,13 +15,14 @@ WEIGHTS_PATH = os.environ.get("WEIGHTS_PATH", os.path.join(BASE_DIR, "config", "
 # Starting hypothesis weights, exactly as specified. These get validated —
 # not trusted — by the backtesting engine.
 DEFAULT_WEIGHTS = {
-    "market_probability":  0.45,
-    "historical_base_rate":0.15,
-    "external_data":       0.15,
-    "order_flow_volume":   0.10,
-    "momentum":            0.075,
-    "cross_market":        0.05,
-    "market_efficiency":   0.025,
+    "market_probability":  0.405,
+    "historical_base_rate":0.135,
+    "external_data":       0.135,
+    "order_flow_volume":   0.090,
+    "momentum":            0.0675,
+    "cross_market":        0.045,
+    "market_efficiency":   0.0225,
+    "cross_exchange_funding": 0.10,
 }
 
 # Crypto assets covered. Politics/macro categories are intentionally out of

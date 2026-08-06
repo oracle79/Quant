@@ -157,6 +157,8 @@ async function loadAlpha(){
       <div class="row"><span class="k">Bets taken (had real edge)</span><span class="v">${a.bets_taken} / ${a.n_resolved_total}</span></div>
       <div class="row"><span class="k">Skipped (no edge, no bet)</span><span class="v">${a.bets_skipped_no_edge}</span></div>
       <div class="row"><span class="k">Win rate of bets taken</span><span class="v">${(a.win_rate_of_bets_taken*100).toFixed(1)}%</span></div>
+      <div class="row" style="border-top:1px solid var(--border); margin-top:4px; padding-top:8px;"><span class="k">Geometric mean return/bet</span><span class="v ${a.geometric_mean_return_per_bet>=0?'up':'down'}">${a.geometric_mean_return_per_bet!=null ? (a.geometric_mean_return_per_bet*100).toFixed(2)+'%' : '--'}</span></div>
+      <div class="row"><span class="k">Bets to double (rule of 72)</span><span class="v">${a.bets_to_double_rule_of_72!=null ? a.bets_to_double_rule_of_72.toFixed(0) : '--'}</span></div>
     `;
   }catch(e){ showErr('Failed to load alpha: '+e.message); }
 }

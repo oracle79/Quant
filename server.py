@@ -100,17 +100,20 @@ def alpha(user: str = Depends(require_auth)):
     """
     THE ANSWER TO 'accuracy alone is misleading': for every resolved
     prediction, simulate the Kelly-sized paper bet it would have placed
-    (only when there was actual edge) and sum the real return. This
-    properly weights a correct low-probability call (bigger payout) against
-    a correct high-probability call (smaller payout) — accuracy % can't do
-    that, P&L can. Non-compounding: each bet sized against a fixed $1
-    notional bankroll, so the total is a clean sum, not compounded growth.
+    (only when there was actual edge) and compute the real return. Reports
+    both the simple sum (easy to read) and the geometric mean per bet (the
+    mathematically correct "true average return" when bets compound —
+    arithmetic mean overstates true growth whenever returns vary, which
+    they always do). Rule of 72 turns that geometric mean into an intuitive
+    "how many bets to double the bankroll" estimate.
     """
     resolved = db.resolved_predictions(limit=1000)
     bets_taken = 0
     cumulative_return = 0.0
+    compound_growth = 1.0
     wins = 0
     curve = [0.0]
+    per_bet_returns = []
 
     for row in resolved:
         rec = recommend_position(row["model_prob"], row["market_prob"])
@@ -128,9 +131,18 @@ def alpha(user: str = Depends(require_auth)):
         frac = rec["kelly_fraction"]
         pnl = frac * (1 - entry_price) / entry_price if won else -frac
         cumulative_return += pnl
+        compound_growth *= (1 + pnl)
+        per_bet_returns.append(pnl)
         if won:
             wins += 1
         curve.append(cumulative_return)
+
+    geometric_mean_return = None
+    bets_to_double = None
+    if bets_taken > 0 and compound_growth > 0:
+        geometric_mean_return = compound_growth ** (1 / bets_taken) - 1
+        if geometric_mean_return > 0:
+            bets_to_double = 72 / (geometric_mean_return * 100)  # Rule of 72
 
     return {
         "n_resolved_total": len(resolved),
@@ -138,6 +150,9 @@ def alpha(user: str = Depends(require_auth)):
         "bets_skipped_no_edge": len(resolved) - bets_taken,
         "win_rate_of_bets_taken": (wins / bets_taken) if bets_taken else None,
         "cumulative_return_fraction": cumulative_return,
+        "compound_growth_multiple": compound_growth if bets_taken else None,
+        "geometric_mean_return_per_bet": geometric_mean_return,
+        "bets_to_double_rule_of_72": bets_to_double,
         "equity_curve": curve,
     }
 

@@ -63,6 +63,12 @@ def backtest_asset_timeframe(asset, timeframe, n_windows=100):
         oi_series = [(o["timestamp"], float(o["sumOpenInterest"])) for o in oi_raw]
     except Exception:
         oi_series = []
+    try:
+        from data_collection.bybit import get_funding_rate_history as get_bybit_funding_history
+        bybit_raw = get_bybit_funding_history(symbol, start_time_ms=start_ms, end_time_ms=end_ms, limit=200)
+        bybit_series = [(int(f["fundingRateTimestamp"]), float(f["fundingRate"])) for f in bybit_raw]
+    except Exception:
+        bybit_series = []
 
     momentum_feat = MomentumFeature()
     external_feat = ExternalDataFeature()
@@ -87,6 +93,7 @@ def backtest_asset_timeframe(asset, timeframe, n_windows=100):
 
         funding_hist = [r for t, r in funding_series if t < window_open_ts][-30:]
         oi_hist = [v for t, v in oi_series if t < window_open_ts][-30:]
+        bybit_hist = [r for t, r in bybit_series if t < window_open_ts][-30:]
         external_result = external_feat.compute({
             "funding_rate_history": funding_hist,
             "open_interest_history": oi_hist,
@@ -102,6 +109,7 @@ def backtest_asset_timeframe(asset, timeframe, n_windows=100):
             "best_bid": None, "best_ask": None, "bid_depth_usd": 0, "ask_depth_usd": 0,
             "closes": fc,
             "funding_rate_history": funding_hist, "open_interest_history": oi_hist,
+            "binance_funding_history": funding_hist, "bybit_funding_history": bybit_hist,
             "correlated_asset_yes_price": None, "correlated_asset_name": None,
             "asset": asset, "timeframe": timeframe, "db_module": db,
         }
@@ -166,4 +174,9 @@ def run_full_backtest(n_windows=100):
                 )
             except Exception as e:
                 summary[key] = {"error": str(e)}
+                try:
+                    from telegram import notifier
+                    notifier.send_message(f"⚠️ Research platform: backtest failed for {key}: {e}")
+                except Exception:
+                    pass
     return summary
