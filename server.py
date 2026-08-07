@@ -19,6 +19,7 @@ from config.settings import load_weights
 from backtesting.engine import run_full_backtest
 from backtesting.monte_carlo import simulate_equity_paths
 from models.kelly import recommend_position
+from backtesting.metrics import sortino_ratio, profit_factor, max_drawdown, check_promotion
 import scan_markets
 
 DASHBOARD_USER = os.environ.get("DASHBOARD_USER")
@@ -144,6 +145,23 @@ def alpha(user: str = Depends(require_auth)):
         if geometric_mean_return > 0:
             bets_to_double = 72 / (geometric_mean_return * 100)  # Rule of 72
 
+    sortino = sortino_ratio(per_bet_returns) if per_bet_returns else None
+    pf = profit_factor(per_bet_returns) if per_bet_returns else None
+    dd = max_drawdown([1.0 + c for c in curve]) if len(curve) > 1 else None
+
+    from database import db as _db
+    latest_bt = _db.latest_backtest_runs(limit=5)
+    distinguishable = None
+    for r in latest_bt:
+        import json as _json
+        feat = _json.loads(r.get("per_feature_accuracy_json") or "{}")
+        cm = feat.get("combined_model", {})
+        if cm.get("distinguishable_from_coinflip") is not None:
+            distinguishable = cm["distinguishable_from_coinflip"]
+            break
+
+    promoted, promotion_failures = check_promotion(bets_taken, distinguishable, sortino, dd, pf)
+
     return {
         "n_resolved_total": len(resolved),
         "bets_taken": bets_taken,
@@ -153,6 +171,11 @@ def alpha(user: str = Depends(require_auth)):
         "compound_growth_multiple": compound_growth if bets_taken else None,
         "geometric_mean_return_per_bet": geometric_mean_return,
         "bets_to_double_rule_of_72": bets_to_double,
+        "sortino_ratio": sortino,
+        "profit_factor": pf,
+        "max_drawdown": dd,
+        "promoted": promoted,
+        "promotion_failures": promotion_failures,
         "equity_curve": curve,
     }
 

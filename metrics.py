@@ -68,3 +68,61 @@ def max_drawdown(equity_curve):
         dd = (peak - v) / peak if peak > 0 else 0
         max_dd = max(max_dd, dd)
     return max_dd
+
+
+def sortino_ratio(returns, risk_free=0.0):
+    """Like Sharpe, but only penalizes DOWNSIDE volatility — a strategy with
+    big wins and small, rare losses looks better here than under Sharpe,
+    which penalizes upside swings too. Standard quant verification metric."""
+    n = len(returns)
+    if n < 2:
+        return None
+    mean_ret = sum(returns) / n
+    downside = [r for r in returns if r < risk_free]
+    if not downside:
+        return None  # no losing periods at all -- ratio undefined, not infinite
+    downside_variance = sum((r - risk_free) ** 2 for r in downside) / n
+    downside_sd = math.sqrt(downside_variance)
+    if downside_sd == 0:
+        return None
+    return (mean_ret - risk_free) / downside_sd * math.sqrt(n)
+
+
+def profit_factor(returns):
+    """Gross profit / gross loss. >1 means winners outweigh losers in dollar
+    terms (not just count) -- the standard first-look number prop desks use."""
+    gross_profit = sum(r for r in returns if r > 0)
+    gross_loss = abs(sum(r for r in returns if r < 0))
+    if gross_loss == 0:
+        return None if gross_profit == 0 else float("inf")
+    return gross_profit / gross_loss
+
+
+# Explicit promotion criteria -- a signal only "graduates" toward being
+# trusted with real capital when it clears ALL of these, not just looks
+# promising. Objective, not a judgment call. Tune thresholds as you learn
+# more; the point is having a fixed bar at all.
+PROMOTION_CRITERIA = {
+    "min_bets": 50,
+    "min_distinguishable_from_coinflip": True,
+    "min_sortino": 0.5,
+    "max_drawdown_allowed": 0.30,
+    "min_profit_factor": 1.2,
+}
+
+
+def check_promotion(n_bets, distinguishable, sortino, max_dd, pf):
+    """Returns (passed: bool, failures: list[str])."""
+    failures = []
+    c = PROMOTION_CRITERIA
+    if n_bets < c["min_bets"]:
+        failures.append(f"only {n_bets} bets (need {c['min_bets']}+)")
+    if distinguishable is not True:
+        failures.append("not statistically distinguishable from a coin flip")
+    if sortino is None or sortino < c["min_sortino"]:
+        failures.append(f"Sortino {sortino} below {c['min_sortino']}")
+    if max_dd is None or max_dd > c["max_drawdown_allowed"]:
+        failures.append(f"max drawdown {max_dd} exceeds {c['max_drawdown_allowed']}")
+    if pf is None or pf < c["min_profit_factor"]:
+        failures.append(f"profit factor {pf} below {c['min_profit_factor']}")
+    return (len(failures) == 0, failures)
